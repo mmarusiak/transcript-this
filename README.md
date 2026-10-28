@@ -15,6 +15,12 @@ poetry install --no-root
 
 This creates a `.venv` in the project directory.
 
+For LLM post-correction (`--correct`, Apple Silicon only) install the optional extra:
+
+```bash
+poetry install --no-root --extras correct
+```
+
 No separate ffmpeg install is needed: faster-whisper decodes audio via the bundled PyAV,
 so mp3, m4a, wav, ogg, flac, mp4, etc. all work.
 
@@ -34,6 +40,8 @@ poetry run python transcribe.py recording.wav -m medium --timestamps
 | `-m`, `--model` | Whisper model: `tiny`, `base`, `small`, `medium`, `large-v3`. Default: `small`. |
 | `--device` | `auto`, `cpu` or `cuda`. Default: `auto`. |
 | `--timestamps` | Prefix each line with an `[hh:mm:ss]` timestamp. |
+| `--correct` | Proofread the transcript with a small local LLM. The raw transcript is kept as `<output>.raw.txt`. |
+| `--llm-model` | mlx-lm model for `--correct`. Default: `mlx-community/Qwen2.5-3B-Instruct-4bit`. |
 
 ## Language detection
 
@@ -47,3 +55,15 @@ For recordings that mix several languages, detection picks one, so pass `-l` exp
 - Larger models (`medium`, `large-v3`) are more accurate, especially for non-English
   languages, but slower.
 - A voice-activity filter is enabled to reduce hallucinations on silent sections.
+
+## Progress
+
+While transcribing, every line is prefixed with the percentage of the file processed,
+e.g. `[ 40%] some text`. During `--correct`, progress is shown per chunk of segments.
+
+## LLM correction
+
+`--correct` runs a multilingual instruct model (Qwen2.5-3B, 4-bit, ~2 GB download on first use)
+through [mlx-lm](https://github.com/ml-explore/mlx-lm) after transcription. It only fixes clear
+recognition errors, punctuation and capitalization. If the model changes the number of lines or
+rewrites a line too much, the original line is kept. Timestamps are never sent to the model.
