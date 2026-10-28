@@ -5,9 +5,13 @@ Usage:
     python transcribe.py recording.m4a
     python transcribe.py recording.mp3 -l pl -o result.txt
     python transcribe.py recording.wav --model medium --timestamps
+    python transcribe.py recording.m4a --correct
 
 If no language is given, it is detected automatically by the Whisper model
 from the audio itself (the first ~30 seconds of the recording).
+
+With --correct, the transcript is afterwards proofread by a small local LLM
+(see corrector.py). The uncorrected transcript is kept as <output>.raw.txt.
 """
 import argparse
 import sys
@@ -33,6 +37,8 @@ def main() -> int:
     )
     parser.add_argument("--device", default="auto", help="auto, cpu or cuda (default: auto)")
     parser.add_argument("--timestamps", action="store_true", help="prefix each segment with a timestamp")
+    parser.add_argument("--correct", action="store_true", help="proofread the transcript with a small local LLM")
+    parser.add_argument("--llm-model", help="mlx-lm model used by --correct (default: see corrector.py)")
     args = parser.parse_args()
 
     if not args.audio.is_file():
@@ -40,6 +46,7 @@ def main() -> int:
         return 1
 
     output = args.output or args.audio.with_suffix(".txt")
+    raw_output = output.with_suffix(".raw.txt") if args.correct else output
 
     print(f"Loading model '{args.model}'...", file=sys.stderr)
     model = WhisperModel(args.model, device=args.device, compute_type="auto")
@@ -57,16 +64,46 @@ def main() -> int:
             f"Detected language: {info.language} (confidence {info.language_probability:.0%})",
             file=sys.stderr,
         )
+    language = args.language or info.language
 
-    with output.open("w", encoding="utf-8") as f:
+    lines: list[str] = []
+    with raw_output.open("w", encoding="utf-8") as f:
         for seg in segments:
             text = seg.text.strip()
             line = f"[{format_ts(seg.start)}] {text}" if args.timestamps else text
+            lines.append(line)
             f.write(line + "\n")
-            print(line, file=sys.stderr)
             f.flush()
 
-    print(f"\nTranscript saved to: {output}", file=sys.stderr)
+            percent = min(100, int(seg.end / info.duration * 100)) if info.duration else 0
+            print(f"[{percent:3d}%] {line}", file=sys.stderr)
+
+    print(f"\nTranscript saved to: {raw_output}", file=sys.stderr)
+
+    if args.correct:
+        from corrector import Corrector
+
+        corrector = Corrector(language, args.llm_model)
+        # Keep timestamps out of the LLM input so it cannot alter them.
+        prefixes, texts = [], []
+        for line in lines:
+            if args.timestamps and line.startswith("["):
+                prefix, _, body = line.partition("] ")
+                prefixes.append(prefix + "] ")
+                texts.append(body)
+            else:
+                prefixes.append("")
+                texts.append(line)
+
+        def report(done: int, total: int) -> None:
+            print(f"[{done * 100 // total:3d}%] Correcting: chunk {done}/{total}", file=sys.stderr)
+
+        fixed = corrector.correct(texts, on_progress=report)
+        with output.open("w", encoding="utf-8") as f:
+            for prefix, text in zip(prefixes, fixed):
+                f.write(prefix + text + "\n")
+        print(f"Corrected transcript saved to: {output}", file=sys.stderr)
+
     return 0
 
 
