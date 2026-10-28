@@ -63,7 +63,32 @@ e.g. `[ 40%] some text`. During `--correct`, progress is shown per chunk of segm
 
 ## LLM correction
 
-`--correct` runs a multilingual instruct model (Qwen2.5-3B, 4-bit, ~2 GB download on first use)
-through [mlx-lm](https://github.com/ml-explore/mlx-lm) after transcription. It only fixes clear
-recognition errors, punctuation and capitalization. If the model changes the number of lines or
-rewrites a line too much, the original line is kept. Timestamps are never sent to the model.
+`--correct` runs a local instruct model through [mlx-lm](https://github.com/ml-explore/mlx-lm)
+after transcription (Apple Silicon only). The model is chosen per language in `corrector.py`:
+
+| Language | Default model | Download |
+| --- | --- | --- |
+| `pl` | `speakleash/Bielik-11B-v2.2-Instruct-MLX-4bit` (Polish-native) | ~6 GB |
+| everything else | `mlx-community/Qwen2.5-3B-Instruct-4bit` (multilingual) | ~2 GB |
+
+Override with `--llm-model`, or add entries to `LANGUAGE_MODELS` in `corrector.py`.
+
+The model only fixes clear recognition errors, punctuation and capitalization. Safeguards:
+
+- Timestamps are never sent to the model.
+- If the model changes the number of lines or rewrites a line too much, the original line is kept.
+- Whisper segments are cut at arbitrary points, so models tend to treat each line as a full sentence.
+  The prompt forbids this, and `keep_line_boundaries()` additionally restores each line's original
+  final punctuation and first-letter case. As a side effect, genuinely wrong line-final punctuation is not fixed.
+
+The model fixes many misheard words but cannot guess names or jargon it never saw
+(e.g. a misrecognised author's name), and 4-bit models still make mistakes. Review the result.
+
+### Correcting an existing transcript
+
+```bash
+poetry run python correct.py transcript.txt -l pl              # writes transcript.corrected.txt
+poetry run python correct.py transcript.txt -l pl --lines 48   # quick preview on the first 48 lines
+```
+
+Correction is slow on large files (a lecture of ~1900 lines is ~240 chunks, roughly an hour with Bielik 11B).
