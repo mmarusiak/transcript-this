@@ -12,6 +12,11 @@ dependencies = [
 ]
 
 
+[project.optional-dependencies]
+correct = [
+    "mlx-lm (>=0.20) ; sys_platform == 'darwin' and platform_machine == 'arm64'"
+]
+
 [tool.poetry]
 package-mode = false
 
